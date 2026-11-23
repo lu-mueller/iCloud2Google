@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+import webbrowser
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -334,6 +335,41 @@ class ContactMappingTests(unittest.TestCase):
 
         self.assertIs(credentials, flow.credentials)
         self.assertEqual(flow.redirect_uri, "http://localhost")
+        flow.fetch_token.assert_called_once_with(code="code")
+
+    def test_oauth_falls_back_to_manual_auth_when_browser_is_unavailable(self) -> None:
+        flow = Mock()
+        flow.run_local_server.side_effect = webbrowser.Error(
+            "could not locate runnable browser"
+        )
+        flow.authorization_url.return_value = (
+            "https://accounts.google.test/auth",
+            "state",
+        )
+        flow.credentials = Mock()
+        flow.credentials.to_json.return_value = '{"token":"test"}'
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token_file = Path(temp_dir) / "token.json"
+            with (
+                patch(
+                    "icloud_to_google.InstalledAppFlow.from_client_config",
+                    return_value=flow,
+                ),
+                patch(
+                    "builtins.input",
+                    return_value="http://localhost/?code=code&state=state",
+                ),
+            ):
+                credentials = _google_credentials(
+                    Path("credentials.json"),
+                    token_file,
+                    "client-id",
+                    "client-secret",
+                )
+            self.assertTrue(token_file.exists())
+
+        self.assertIs(credentials, flow.credentials)
+        flow.run_local_server.assert_called_once_with(port=0)
         flow.fetch_token.assert_called_once_with(code="code")
 
     def test_manual_oauth_rejects_non_localhost_redirect(self) -> None:

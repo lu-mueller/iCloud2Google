@@ -11,6 +11,7 @@ import smtplib
 import ssl
 import sys
 import time
+import webbrowser
 import xml.etree.ElementTree as ET
 from datetime import date, datetime
 from email.message import EmailMessage
@@ -667,6 +668,49 @@ def find_matches(
     return matches
 
 
+def _manual_google_authorization(flow: InstalledAppFlow) -> Credentials:
+    flow.redirect_uri = "http://localhost"
+    authorization_url, expected_state = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+    )
+    print(
+        "Öffne diese URL in einem Browser (auch auf einem anderen Gerät):\n"
+        f"{authorization_url}\n"
+        "Nach der Anmeldung wird die localhost-Seite eventuell nicht "
+        "erreichbar sein. Kopiere dann die vollständige URL aus der "
+        "Adresszeile und füge sie hier ein."
+    )
+    try:
+        authorization_response = input("Weiterleitungs-URL: ").strip()
+    except EOFError as error:
+        raise RuntimeError("Keine OAuth-Weiterleitungs-URL eingegeben.") from error
+
+    redirect = urlsplit(authorization_response)
+    if redirect.scheme != "http" or redirect.hostname != "localhost":
+        raise ValueError(
+            "Die OAuth-Weiterleitungs-URL muss auf http://localhost zeigen."
+        )
+    parameters = parse_qs(redirect.query, keep_blank_values=True)
+    if parameters.get("state") != [expected_state]:
+        raise ValueError(
+            "Der OAuth-Status in der Weiterleitungs-URL stimmt nicht "
+            "mit der Anmeldung überein. Starte die Anmeldung erneut."
+        )
+    if parameters.get("error"):
+        raise RuntimeError(
+            f"Google hat die OAuth-Anmeldung abgelehnt: {parameters['error'][0]}"
+        )
+    authorization_codes = parameters.get("code", [])
+    if len(authorization_codes) != 1 or not authorization_codes[0]:
+        raise ValueError(
+            "In der OAuth-Weiterleitungs-URL fehlt ein eindeutiger "
+            "Autorisierungscode."
+        )
+    flow.fetch_token(code=authorization_codes[0])
+    return flow.credentials
+
+
 def _google_credentials(
     client_file: Path,
     token_file: Path,
@@ -699,50 +743,16 @@ def _google_credentials(
                 str(client_file), GOOGLE_SCOPES
             )
         if manual_auth:
-            flow.redirect_uri = "http://localhost"
-            authorization_url, expected_state = flow.authorization_url(
-                access_type="offline",
-                prompt="consent",
-            )
-            print(
-                "Öffne diese URL in einem Browser (auch auf einem anderen Gerät):\n"
-                f"{authorization_url}\n"
-                "Nach der Anmeldung wird die localhost-Seite eventuell nicht "
-                "erreichbar sein. Kopiere dann die vollständige URL aus der "
-                "Adresszeile und füge sie hier ein."
-            )
-            try:
-                authorization_response = input("Weiterleitungs-URL: ").strip()
-            except EOFError as error:
-                raise RuntimeError(
-                    "Keine OAuth-Weiterleitungs-URL eingegeben."
-                ) from error
-            redirect = urlsplit(authorization_response)
-            if redirect.scheme != "http" or redirect.hostname != "localhost":
-                raise ValueError(
-                    "Die OAuth-Weiterleitungs-URL muss auf http://localhost zeigen."
-                )
-            parameters = parse_qs(redirect.query, keep_blank_values=True)
-            if parameters.get("state") != [expected_state]:
-                raise ValueError(
-                    "Der OAuth-Status in der Weiterleitungs-URL stimmt nicht "
-                    "mit der Anmeldung überein. Starte die Anmeldung erneut."
-                )
-            if parameters.get("error"):
-                raise RuntimeError(
-                    f"Google hat die OAuth-Anmeldung abgelehnt: "
-                    f"{parameters['error'][0]}"
-                )
-            authorization_codes = parameters.get("code", [])
-            if len(authorization_codes) != 1 or not authorization_codes[0]:
-                raise ValueError(
-                    "In der OAuth-Weiterleitungs-URL fehlt ein eindeutiger "
-                    "Autorisierungscode."
-                )
-            flow.fetch_token(code=authorization_codes[0])
-            credentials = flow.credentials
+            credentials = _manual_google_authorization(flow)
         else:
-            credentials = flow.run_local_server(port=0)
+            try:
+                credentials = flow.run_local_server(port=0)
+            except webbrowser.Error:
+                LOGGER.warning(
+                    "Kein lokaler Browser verfügbar; wechsle zur manuellen "
+                    "OAuth-Anmeldung."
+                )
+                credentials = _manual_google_authorization(flow)
     token_file.write_text(credentials.to_json(), encoding="utf-8")
     return credentials
 

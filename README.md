@@ -95,6 +95,10 @@ speichert das OAuth-Token lokal in `token.json`; diese Datei und
 `credentials.json` sind in `.gitignore` eingetragen. Zugangsdaten können über
 `GOOGLE_OAUTH_CLIENT_FILE` und `GOOGLE_TOKEN_FILE` an andere Dateipfade
 verlegt werden.
+Auf headless Linux-Systemen ohne installierten Browser wechselt das Skript
+automatisch zur manuellen Anmeldung: Öffne die angezeigte URL auf einem
+anderen Gerät und füge anschließend die vollständige `http://localhost/...`-
+Rückleitungs-URL im Terminal ein.
 
 Das Skript meldet jeden Synchronisierungsschritt mit Zeitstempel und
 Kontaktzähler im Terminal. Vorübergehende Fehler beim Abrufen von
